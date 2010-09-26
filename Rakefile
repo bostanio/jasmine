@@ -74,9 +74,9 @@ namespace :jasmine do
 
       jasmine.puts %{
 jasmine.version_= {
-  "major": #{version['major']},
-  "minor": #{version['minor']},
-  "build": #{version['build']},
+  "major": #{version['major'].to_json},
+  "minor": #{version['minor'].to_json},
+  "build": #{version['build'].to_json},
   "revision": #{Time.now.to_i}
 };
 }
@@ -131,7 +131,8 @@ jasmine.version_= {
     {
         "lib/jasmine.js" => "jasmine.js",
         "lib/jasmine-html.js" => "jasmine-html.js",
-        "src/html/jasmine.css" => "jasmine.css"
+        "src/html/jasmine.css" => "jasmine.css",
+        "MIT.LICENSE"  => "MIT.LICENSE"
     }.each_pair do |src, dest|
       FileUtils.cp(File.join(root, src), File.join(lib_dir, dest))
     end
@@ -151,13 +152,14 @@ jasmine.version_= {
     require 'digest/sha1'
 
     download_html = "<!-- START_DOWNLOADS -->\n"
-    download_html += "<table>\n<tr><th></th><th>Version</th><th>Size</th><th>Date</th><th>SHA1</th></tr>\n"
+    download_html += "<table id=\"standalone-downloads\">\n<tr><th></th><th>Version</th><th>Size</th><th>Date</th><th>SHA1</th></tr>\n"
     Dir.glob('pages/downloads/*.zip').sort.reverse.each do |f|
       sha1 = Digest::SHA1.hexdigest File.read(f)
 
       fn = f.sub(/^pages\//, '')
       version = /jasmine-standalone-(.*).zip/.match(f)[1]
-      download_html += "<tr>\n"
+      prerelease = /\.rc/.match(f)
+      download_html += prerelease ? "<tr class=\"rc\">\n" : "<tr>\n"
       download_html += "<td class=\"link\"><a href='#{fn}'>#{fn.sub(/downloads\//, '')}</a></td>\n"
       download_html += "<td class=\"version\">#{version}</td>\n"
       download_html += "<td class=\"size\">#{File.size(f) / 1024}k</td>\n"
