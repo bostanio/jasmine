@@ -17,7 +17,6 @@ def version_hash
   @version ||= JSON.parse(File.new("src/version.json").read);
 end
 
-task :default => 'jasmine:dist'
 
 def substitute_jasmine_version(filename)
   contents = File.read(filename)
@@ -26,36 +25,40 @@ def substitute_jasmine_version(filename)
   File.open(filename, 'w') { |f| f.write(contents) }
 end
 
+task :default => :spec
+
+desc "Run spec suite: Browser, Node, JSHint"
+task :spec => ["spec:node", "spec:browser", "jasmine:hint"]
+
+namespace :spec do
+  desc 'Run specs in Node.js'
+  task :node do
+    system("node spec/node_suite.js")
+  end
+
+  desc "Run specs in the default browser (MacOS only)"
+  task :browser do
+    system("open spec/runner.html")
+  end
+end
+
 namespace :jasmine do
 
   desc 'Prepares for distribution'
-  task :dist => ['jasmine:build', 'jasmine:doc', 'jasmine:build_example_project', 'jasmine:fill_index_downloads']
+  task :dist => ['jasmine:build',
+                 'jasmine:doc',
+                 'jasmine:build_pages',
+                 'jasmine:build_example_project',
+                 'jasmine:fill_index_downloads']
 
   desc 'Check jasmine sources for coding problems'
   task :lint do
-    passed = true
-    jasmine_sources.each do |src|
-      lines = File.read(src).split(/\n/)
-      lines.each_index do |i|
-        line = lines[i]
-        undefineds = line.scan(/.?undefined/)
-        if undefineds.include?(" undefined") || undefineds.include?("\tundefined")
-          puts "Dangerous undefined at #{src}:#{i}:\n > #{line}"
-          passed = false
-        end
-
-        if line.scan(/window/).length > 0
-          puts "Dangerous window at #{src}:#{i}:\n > #{line}"
-          passed = false
-        end
-      end
-    end
-
-    unless passed
-      puts "Lint failed!"
-      exit 1
-    end
+    puts "Running JSHint via Node.js"
+    system("node jshint/run.js") || exit(1)
   end
+
+  desc "Alias to JSHint"
+  task :hint => :lint
 
   desc 'Builds lib/jasmine from source'
   task :build => :lint do
@@ -63,9 +66,6 @@ namespace :jasmine do
 
     sources = jasmine_sources
     version = version_hash
-
-    old_jasmine_files = Dir.glob('lib/jasmine*.js')
-    old_jasmine_files.each { |file| File.delete(file) }
 
     File.open("lib/jasmine.js", 'w') do |jasmine|
       sources.each do |source_filename|
@@ -91,9 +91,22 @@ jasmine.version_= {
     FileUtils.cp("src/html/jasmine.css", "lib/jasmine.css")
   end
 
+  downloads_file = 'pages/download.html'
   task :need_pages_submodule do
-    unless File.exists?('pages/index.html')
+    unless File.exist?(downloads_file)
       raise "Jasmine pages submodule isn't present.  Run git submodule update --init"
+    end
+  end
+
+  desc "Build the Github pages HTML"
+  task :build_pages => :need_pages_submodule do
+    Dir.chdir("pages") do
+      FileUtils.rm_r('pages_output') if File.exist?('pages_output')
+      Dir.chdir('pages_source') do
+        system("frank export ../pages_output")
+      end
+      puts "\nCopying Frank output to the root of the gh-pages branch\n\n"
+      system("cp -r pages_output/* .")
     end
   end
 
@@ -109,6 +122,8 @@ jasmine.version_= {
       t[:files] = jasmine_sources << jasmine_html_sources
       t[:options] = "-a"
       t[:out] = "pages/jsdoc"
+      # JsdocHelper bug: template must be relative to the JsdocHelper gem, ick
+      t[:template] = File.join("../".*(100), Dir::getwd, "jsdoc-template")
     end
     Rake::Task[:lambda_jsdoc].invoke
   end
@@ -119,7 +134,7 @@ jasmine.version_= {
 
     temp_dir = File.join(Dir.tmpdir, 'jasmine-standalone-project')
     puts "Building Example Project in #{temp_dir}"
-    FileUtils.rm_r temp_dir if File.exists?(temp_dir)
+    FileUtils.rm_r temp_dir if File.exist?(temp_dir)
     Dir.mkdir(temp_dir)
 
     root = File.expand_path(File.dirname(__FILE__))
@@ -148,33 +163,4 @@ jasmine.version_= {
     exec "cd #{temp_dir} && zip -r #{zip_file_name} . -x .[a-zA-Z0-9]*"
   end
 
-  task :fill_index_downloads do
-    require 'digest/sha1'
-
-    download_html = "<!-- START_DOWNLOADS -->\n"
-    download_html += "<table id=\"standalone-downloads\">\n<tr><th></th><th>Version</th><th>Size</th><th>Date</th><th>SHA1</th></tr>\n"
-    Dir.glob('pages/downloads/*.zip').sort.reverse.each do |f|
-      sha1 = Digest::SHA1.hexdigest File.read(f)
-
-      fn = f.sub(/^pages\//, '')
-      version = /jasmine-standalone-(.*).zip/.match(f)[1]
-      prerelease = /\.rc/.match(f)
-      download_html += prerelease ? "<tr class=\"rc\">\n" : "<tr>\n"
-      download_html += "<td class=\"link\"><a href='#{fn}'>#{fn.sub(/downloads\//, '')}</a></td>\n"
-      download_html += "<td class=\"version\">#{version}</td>\n"
-      download_html += "<td class=\"size\">#{File.size(f) / 1024}k</td>\n"
-      download_html += "<td class=\"date\">#{File.mtime(f).strftime("%Y/%m/%d %H:%M:%S %Z")}</td>\n"
-      download_html += "<td class=\"sha\">#{sha1}</td>\n"
-      download_html += "</tr>\n"
-    end
-    download_html += "</table>\n<!-- END_DOWNLOADS -->"
-
-    index_page = File.read('pages/index.html')
-    matcher = /<!-- START_DOWNLOADS -->.*<!-- END_DOWNLOADS -->/m
-    index_page = index_page.sub(matcher, download_html)
-    File.open('pages/index.html', 'w') {|f| f.write(index_page)}
-    puts "rewrote that file"
-  end
 end
-
-task :jasmine => ['jasmine:dist']
